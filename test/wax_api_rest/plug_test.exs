@@ -187,6 +187,39 @@ defmodule WaxAPIREST.PlugTest do
     )
   end
 
+  defmodule AppRouterAuthenticatorSelectionMap do
+    use Plug.Router
+
+    plug(:match)
+    plug(:dispatch)
+
+    forward("/",
+      to: WaxAPIREST.Plug,
+      callback_module: WaxAPIREST.Callback.Test,
+      authenticator_selection: %{
+        "residentKey" => "required",
+        "requireResidentKey" => true,
+        "userVerification" => "required"
+      }
+    )
+  end
+
+  defmodule AppRouterAuthenticatorSelectionStruct do
+    use Plug.Router
+
+    plug(:match)
+    plug(:dispatch)
+
+    forward("/",
+      to: WaxAPIREST.Plug,
+      callback_module: WaxAPIREST.Callback.Test,
+      authenticator_selection: %WaxAPIREST.Types.AuthenticatorSelectionCriteria{
+        residentKey: "required",
+        userVerification: "required"
+      }
+    )
+  end
+
   setup do
     WaxAPIREST.Callback.Test.setup_table()
     :ok
@@ -246,6 +279,166 @@ defmodule WaxAPIREST.PlugTest do
     assert %{
              "status" => "failed",
              "errorMessage" => _
+           } = Jason.decode!(conn.resp_body)
+  end
+
+  test "configured authenticator selection (map) overrides the request's" do
+    request = %{
+      "username" => "johndoe@example.com",
+      "displayName" => "John Doe",
+      "authenticatorSelection" => %{
+        "residentKey" => "discouraged",
+        "requireResidentKey" => false,
+        "userVerification" => "discouraged"
+      }
+    }
+
+    conn =
+      conn(:post, "/attestation/options", request)
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouterAuthenticatorSelectionMap.call([])
+
+    assert %{
+             "status" => "ok",
+             "authenticatorSelection" => %{
+               "residentKey" => "required",
+               "requireResidentKey" => true,
+               "userVerification" => "required"
+             }
+           } = Jason.decode!(conn.resp_body)
+  end
+
+  test "configured authenticator selection (struct) overrides the request's" do
+    request = %{
+      "username" => "johndoe@example.com",
+      "displayName" => "John Doe",
+      "authenticatorSelection" => %{"residentKey" => "discouraged"}
+    }
+
+    conn =
+      conn(:post, "/attestation/options", request)
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouterAuthenticatorSelectionStruct.call([])
+
+    assert %{
+             "status" => "ok",
+             "authenticatorSelection" => %{
+               "residentKey" => "required",
+               "userVerification" => "required"
+             }
+           } = Jason.decode!(conn.resp_body)
+  end
+
+  test "configured authenticator selection from the application environment" do
+    Application.put_env(WaxAPIREST, :authenticator_selection, %{"residentKey" => "required"})
+    on_exit(fn -> Application.delete_env(WaxAPIREST, :authenticator_selection) end)
+
+    request = %{
+      "username" => "johndoe@example.com",
+      "displayName" => "John Doe",
+      "authenticatorSelection" => %{"residentKey" => "discouraged"}
+    }
+
+    # with a router that doesn't set the option, the application environment applies
+    conn =
+      conn(:post, "/attestation/options", request)
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouter.call([])
+
+    assert %{
+             "status" => "ok",
+             "authenticatorSelection" => %{"residentKey" => "required"} = selection
+           } = Jason.decode!(conn.resp_body)
+
+    refute Map.has_key?(selection, "userVerification")
+
+    # the plug option takes precedence over the application environment
+    conn =
+      conn(:post, "/attestation/options", request)
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouterAuthenticatorSelectionMap.call([])
+
+    assert %{
+             "status" => "ok",
+             "authenticatorSelection" => %{
+               "residentKey" => "required",
+               "userVerification" => "required"
+             }
+           } = Jason.decode!(conn.resp_body)
+  end
+
+  test "configured userVerification is set on the registration challenge" do
+    request = %{"username" => "johndoe@example.com", "displayName" => "John Doe"}
+
+    conn(:post, "/attestation/options", request)
+    |> put_req_cookie("fido_test_suite", "abcdef")
+    |> put_resp_content_type("application/json")
+    |> AppRouterAuthenticatorSelectionMap.call([])
+
+    assert %Wax.Challenge{user_verification: "required"} = stored_challenge("abcdef")
+  end
+
+  test "configured userVerification rejects an attestation result without the UV flag" do
+    request = %{"username" => "johndoe@example.com", "displayName" => "John Doe"}
+
+    conn(:post, "/attestation/options", request)
+    |> put_req_cookie("fido_test_suite", "abcdef")
+    |> put_resp_content_type("application/json")
+    |> AppRouterAuthenticatorSelectionMap.call([])
+
+    challenge = stored_challenge("abcdef")
+    assert challenge.user_verification == "required"
+
+    # re-target the plug-created challenge at the U2F test vector, whose
+    # authenticator data has the UV flag unset
+    %{
+      challenge
+      | bytes: Base.url_decode64!("NxyZopwVKbFl7EnnMae_5Fnir7QJ7QWp1UFUKjFHlfk", padding: false),
+        origin: "http://localhost:3000",
+        rp_id: "localhost",
+        attestation: "direct",
+        verify_trust_root: false
+    }
+    |> replace_stored_challenge("abcdef")
+
+    conn =
+      conn(:post, "/attestation/result", attestation_result_request())
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouterAuthenticatorSelectionMap.call([])
+
+    assert conn.status == 400
+
+    assert %{"status" => "failed", "errorMessage" => error_message} =
+             Jason.decode!(conn.resp_body)
+
+    assert error_message =~ "user_not_verified"
+
+    # no key has been registered
+    cookie_hash = :crypto.hash(:sha256, "abcdef") |> Base.url_encode64()
+    assert :ets.lookup(WaxAPIREST.Callback.Test, cookie_hash) == []
+  end
+
+  test "the request's authenticator selection is used when none is configured" do
+    request = %{
+      "username" => "johndoe@example.com",
+      "displayName" => "John Doe",
+      "authenticatorSelection" => %{"residentKey" => "preferred"}
+    }
+
+    conn =
+      conn(:post, "/attestation/options", request)
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouter.call([])
+
+    assert %{
+             "status" => "ok",
+             "authenticatorSelection" => %{"residentKey" => "preferred"}
            } = Jason.decode!(conn.resp_body)
   end
 
@@ -505,5 +698,21 @@ defmodule WaxAPIREST.PlugTest do
       {cookie_hash <> "_challenge", :erlang.term_to_binary(challenge),
        System.system_time(:second)}
     )
+  end
+
+  defp stored_challenge(cookie) do
+    cookie_hash = :crypto.hash(:sha256, cookie) |> Base.url_encode64()
+
+    [{_, challenge_binary, _timestamp}] =
+      :ets.lookup(WaxAPIREST.Callback.Test, cookie_hash <> "_challenge")
+
+    :erlang.binary_to_term(challenge_binary)
+  end
+
+  defp replace_stored_challenge(challenge, cookie) do
+    cookie_hash = :crypto.hash(:sha256, cookie) |> Base.url_encode64()
+
+    :ets.delete(WaxAPIREST.Callback.Test, cookie_hash <> "_challenge")
+    store_challenge(challenge, cookie)
   end
 end
