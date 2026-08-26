@@ -100,7 +100,7 @@ defmodule WaxAPIREST.Callback.Test do
   end
 
   @impl WaxAPIREST.Callback
-  def register_key(conn, credential_id, authenticator_data, _attestation_result) do
+  def register_key(conn, credential_id, authenticator_data, _attestation_result, transports) do
     cookie = get_cookie(conn, "fido_test_suite")
 
     if cookie do
@@ -110,7 +110,8 @@ defmodule WaxAPIREST.Callback.Test do
 
       key_data = %{
         cose_key: cose_key,
-        sign_count: sign_count
+        sign_count: sign_count,
+        transports: transports
       }
 
       # Store as 3-tuple to match test format: {cookie_hash, credential_id, key_data}
@@ -246,6 +247,73 @@ defmodule WaxAPIREST.PlugTest do
              "status" => "failed",
              "errorMessage" => _
            } = Jason.decode!(conn.resp_body)
+  end
+
+  test "attestation result passes client transports to the callback" do
+    forged_registration_challenge() |> store_challenge("abcdef")
+
+    request =
+      attestation_result_request()
+      |> Map.put("transports", ["usb", "internal", "carrier-pigeon"])
+
+    conn =
+      conn(:post, "/attestation/result", request)
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouter.call([])
+
+    assert %{"status" => "ok", "errorMessage" => ""} = Jason.decode!(conn.resp_body)
+
+    cookie_hash = :crypto.hash(:sha256, "abcdef") |> Base.url_encode64()
+
+    assert [{^cookie_hash, _credential_id, key_data}] =
+             :ets.lookup(WaxAPIREST.Callback.Test, cookie_hash)
+
+    # invalid transport values are silently dropped
+    assert key_data.transports == ["usb", "internal"]
+  end
+
+  test "attestation result prefers transports nested in the response object" do
+    forged_registration_challenge() |> store_challenge("abcdef")
+
+    request =
+      attestation_result_request()
+      |> Map.put("transports", ["nfc"])
+      |> Map.update!("response", &Map.put(&1, "transports", ["usb", "hybrid"]))
+
+    conn =
+      conn(:post, "/attestation/result", request)
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouter.call([])
+
+    assert %{"status" => "ok", "errorMessage" => ""} = Jason.decode!(conn.resp_body)
+
+    cookie_hash = :crypto.hash(:sha256, "abcdef") |> Base.url_encode64()
+
+    assert [{^cookie_hash, _credential_id, key_data}] =
+             :ets.lookup(WaxAPIREST.Callback.Test, cookie_hash)
+
+    assert key_data.transports == ["usb", "hybrid"]
+  end
+
+  test "attestation result passes an empty transport list when the client sends none" do
+    forged_registration_challenge() |> store_challenge("abcdef")
+
+    conn =
+      conn(:post, "/attestation/result", attestation_result_request())
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouter.call([])
+
+    assert %{"status" => "ok", "errorMessage" => ""} = Jason.decode!(conn.resp_body)
+
+    cookie_hash = :crypto.hash(:sha256, "abcdef") |> Base.url_encode64()
+
+    assert [{^cookie_hash, _credential_id, key_data}] =
+             :ets.lookup(WaxAPIREST.Callback.Test, cookie_hash)
+
+    assert key_data.transports == []
   end
 
   test "attestation options convert a non-default challenge timeout to milliseconds" do
@@ -391,5 +459,51 @@ defmodule WaxAPIREST.PlugTest do
              "status" => "failed",
              "errorMessage" => _
            } = Jason.decode!(conn.resp_body)
+  end
+
+  # A genuine FIDO U2F registration test vector. The challenge contained in its
+  # clientDataJSON is "NxyZopwVKbFl7EnnMae_5Fnir7QJ7QWp1UFUKjFHlfk" and its
+  # origin is "http://localhost:3000".
+  defp attestation_result_request do
+    %{
+      "id" =>
+        "LFdoCFJTyB82ZzSJUHc-c72yraRc_1mPvGX8ToE8su39xX26Jcqd31LUkKOS36FIAWgWl6itMKqmDvruha6ywA",
+      "rawId" =>
+        "LFdoCFJTyB82ZzSJUHc-c72yraRc_1mPvGX8ToE8su39xX26Jcqd31LUkKOS36FIAWgWl6itMKqmDvruha6ywA",
+      "response" => %{
+        "clientDataJSON" =>
+          "eyJjaGFsbGVuZ2UiOiJOeHlab3B3VktiRmw3RW5uTWFlXzVGbmlyN1FKN1FXcDFVRlVLakZIbGZrIiwiY2xpZW50RXh0ZW5zaW9ucyI6e30sImhhc2hBbGdvcml0aG0iOiJTSEEtMjU2Iiwib3JpZ2luIjoiaHR0cDovL2xvY2FsaG9zdDozMDAwIiwidHlwZSI6IndlYmF1dGhuLmNyZWF0ZSJ9",
+        "attestationObject" =>
+          "o2NmbXRoZmlkby11MmZnYXR0U3RtdKJjc2lnWEcwRQIgVzzvX3Nyp_g9j9f2B-tPWy6puW01aZHI8RXjwqfDjtQCIQDLsdniGPO9iKr7tdgVV-FnBYhvzlZLG3u28rVt10YXfGN4NWOBWQJOMIICSjCCATKgAwIBAgIEVxb3wDANBgkqhkiG9w0BAQsFADAuMSwwKgYDVQQDEyNZdWJpY28gVTJGIFJvb3QgQ0EgU2VyaWFsIDQ1NzIwMDYzMTAgFw0xNDA4MDEwMDAwMDBaGA8yMDUwMDkwNDAwMDAwMFowLDEqMCgGA1UEAwwhWXViaWNvIFUyRiBFRSBTZXJpYWwgMjUwNTY5MjI2MTc2MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZNkcVNbZV43TsGB4TEY21UijmDqvNSfO6y3G4ytnnjP86ehjFK28-FdSGy9MSZ-Ur3BVZb4iGVsptk5NrQ3QYqM7MDkwIgYJKwYBBAGCxAoCBBUxLjMuNi4xLjQuMS40MTQ4Mi4xLjUwEwYLKwYBBAGC5RwCAQEEBAMCBSAwDQYJKoZIhvcNAQELBQADggEBAHibGMqbpNt2IOL4i4z96VEmbSoid9Xj--m2jJqg6RpqSOp1TO8L3lmEA22uf4uj_eZLUXYEw6EbLm11TUo3Ge-odpMPoODzBj9aTKC8oDFPfwWj6l1O3ZHTSma1XVyPqG4A579f3YAjfrPbgj404xJns0mqx5wkpxKlnoBKqo1rqSUmonencd4xanO_PHEfxU0iZif615Xk9E4bcANPCfz-OLfeKXiT-1msixwzz8XGvl2OTMJ_Sh9G9vhE-HjAcovcHfumcdoQh_WM445Za6Pyn9BZQV3FCqMviRR809sIATfU5lu86wu_5UGIGI7MFDEYeVGSqzpzh6mlcn8QSIZoYXV0aERhdGFYxEmWDeWIDoxodDQXD2R2YFuP5K65ooYyx5lc87qDHZdjQQAAAAAAAAAAAAAAAAAAAAAAAAAAAEAsV2gIUlPIHzZnNIlQdz5zvbKtpFz_WY-8ZfxOgTyy7f3Ffbolyp3fUtSQo5LfoUgBaBaXqK0wqqYO-u6FrrLApQECAyYgASFYIPr9-YH8DuBsOnaI3KJa0a39hyxh9LDtHErNvfQSyxQsIlgg4rAuQQ5uy4VXGFbkiAt0uwgJJodp-DymkoBcrGsLtkI"
+      },
+      "type" => "public-key"
+    }
+  end
+
+  # Builds a registration challenge whose bytes match the challenge of the
+  # attestation_result_request/0 test vector, so that Wax.register/3 succeeds
+  defp forged_registration_challenge do
+    challenge =
+      Wax.new_registration_challenge(
+        origin: "http://localhost:3000",
+        rp_id: "localhost",
+        attestation: "direct",
+        verify_trust_root: false
+      )
+
+    %{
+      challenge
+      | bytes: Base.url_decode64!("NxyZopwVKbFl7EnnMae_5Fnir7QJ7QWp1UFUKjFHlfk", padding: false)
+    }
+  end
+
+  defp store_challenge(challenge, cookie) do
+    cookie_hash = :crypto.hash(:sha256, cookie) |> Base.url_encode64()
+
+    :ets.insert(
+      WaxAPIREST.Callback.Test,
+      {cookie_hash <> "_challenge", :erlang.term_to_binary(challenge),
+       System.system_time(:second)}
+    )
   end
 end
