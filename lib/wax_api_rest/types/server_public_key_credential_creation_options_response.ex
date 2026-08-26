@@ -52,6 +52,11 @@ defmodule WaxAPIREST.Types.ServerPublicKeyCredentialCreationOptionsResponse do
       || request.attestation
       || "none"
 
+    authenticator_selection =
+      opts[:authenticator_selection]
+      || Application.get_env(WaxAPIREST, :authenticator_selection)
+      || request.authenticatorSelection
+
     %__MODULE__{
       rp: PublicKeyCredentialRpEntity.new(
         opts[:rp_name] || Application.get_env(WaxAPIREST, :rp_name) || challenge.rp_id,
@@ -77,7 +82,7 @@ defmodule WaxAPIREST.Types.ServerPublicKeyCredentialCreationOptionsResponse do
         end),
       # `Wax.Challenge.t()` timeout is expressed in seconds, WebAuthn timeout in milliseconds
       timeout: challenge.timeout * 1000,
-      authenticatorSelection: request.authenticatorSelection,
+      authenticatorSelection: AuthenticatorSelectionCriteria.normalize(authenticator_selection),
       extensions: request.extensions,
       excludeCredentials: opts[:exclude_credentials] || [],
       attestation: attestation
