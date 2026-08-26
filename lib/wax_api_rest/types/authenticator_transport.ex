@@ -6,19 +6,25 @@ defmodule WaxAPIREST.Types.AuthenticatorTransport do
   - `"usb"`
   - `"nfc"`
   - `"ble"`
+  - `"smart-card"`
+  - `"hybrid"`
   - `"internal"`
   - `"lightning"`
   """
   @type t :: String.t()
 
+  @accepted_values ["usb", "nfc", "ble", "smart-card", "hybrid", "internal", "lightning"]
+
   @spec new(String.t()) :: t() | no_return()
-  def new("usb"), do: "none"
-  def new("nfc"), do: "indirect"
-  def new("ble"), do: "direct"
-  def new("internal"), do: "direct"
-  def new("lightning"), do: "direct"
+  def new(val) when val in @accepted_values, do: val
   def new(val), do: raise Error.InvalidField,
                     field: "transports",
                     value: val,
-                    accepted_value: ["usb", "nfc", "ble", "internal", "lightning"]
+                    accepted_value: @accepted_values
+
+  @doc """
+  Returns the list of accepted transport values
+  """
+  @spec accepted_values() :: [t()]
+  def accepted_values(), do: @accepted_values
 end
