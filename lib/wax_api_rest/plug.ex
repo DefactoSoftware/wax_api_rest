@@ -44,7 +44,7 @@ defmodule WaxAPIREST.Plug do
       end
   """
 
-  use Plug.Router
+  use Plug.Router, copy_opts_to_assign: :init_opts
   use Plug.ErrorHandler
 
   alias WaxAPIREST.Types.{
@@ -98,10 +98,11 @@ defmodule WaxAPIREST.Plug do
   @max_base64_string_length 65536
 
   plug(:match)
-  plug(:dispatch, builder_opts())
+  plug(:dispatch)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
 
   post "/attestation/options" do
+    opts = conn.assigns[:init_opts]
     callback_module = callback_module(opts)
 
     creation_request = ServerPublicKeyCredentialCreationOptionsRequest.new(conn.body_params)
@@ -149,6 +150,7 @@ defmodule WaxAPIREST.Plug do
   end
 
   post "/attestation/result" do
+    opts = conn.assigns[:init_opts]
     callback_module = callback_module(opts)
 
     challenge = callback_module.get_challenge(conn)
@@ -220,6 +222,7 @@ defmodule WaxAPIREST.Plug do
   end
 
   post "/assertion/options" do
+    opts = conn.assigns[:init_opts]
     callback_module = callback_module(opts)
 
     creation_request = ServerPublicKeyCredentialGetOptionsRequest.new(conn.body_params)
@@ -256,6 +259,7 @@ defmodule WaxAPIREST.Plug do
   end
 
   post "/assertion/result" do
+    opts = conn.assigns[:init_opts]
     callback_module = callback_module(opts)
 
     challenge = callback_module.get_challenge(conn)

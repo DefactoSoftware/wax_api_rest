@@ -129,20 +129,16 @@ defmodule WaxAPIREST.Callback.Test do
       cookie_hash = :crypto.hash(:sha256, cookie) |> Base.url_encode64()
 
       # Find the entry matching this credential_id
-      case :ets.lookup(@table_name, cookie_hash) do
-        entries when is_list(entries) ->
-          case Enum.find(entries, fn {^cookie_hash, cred_id, _} -> cred_id == credential_id end) do
-            {^cookie_hash, ^credential_id, key_data} ->
-              updated_key_data = Map.put(key_data, :sign_count, authenticator_data.sign_count)
-              # Delete old entry and insert updated one
-              :ets.delete_object(@table_name, {cookie_hash, credential_id, key_data})
-              :ets.insert(@table_name, {cookie_hash, credential_id, updated_key_data})
+      entries = :ets.lookup(@table_name, cookie_hash)
 
-            _ ->
-              :ok
-          end
+      case Enum.find(entries, fn {^cookie_hash, cred_id, _} -> cred_id == credential_id end) do
+        {^cookie_hash, ^credential_id, key_data} ->
+          updated_key_data = Map.put(key_data, :sign_count, authenticator_data.sign_count)
+          # Delete old entry and insert updated one
+          :ets.delete_object(@table_name, {cookie_hash, credential_id, key_data})
+          :ets.insert(@table_name, {cookie_hash, credential_id, updated_key_data})
 
-        [] ->
+        _ ->
           :ok
       end
     end

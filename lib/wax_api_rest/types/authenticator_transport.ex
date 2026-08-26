@@ -17,10 +17,14 @@ defmodule WaxAPIREST.Types.AuthenticatorTransport do
 
   @spec new(String.t()) :: t() | no_return()
   def new(val) when val in @accepted_values, do: val
-  def new(val), do: raise Error.InvalidField,
-                    field: "transports",
-                    value: val,
-                    accepted_value: @accepted_values
+
+  def new(val),
+    do:
+      raise(Error.InvalidField,
+        field: "transports",
+        value: val,
+        accepted_value: @accepted_values
+      )
 
   @doc """
   Returns the list of accepted transport values
