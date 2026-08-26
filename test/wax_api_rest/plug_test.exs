@@ -585,6 +585,32 @@ defmodule WaxAPIREST.PlugTest do
     end
   end
 
+  test "assertion options accept a request without username" do
+    :ets.insert(
+      WaxAPIREST.Callback.Test,
+      {
+        :crypto.hash(:sha256, "abcdef") |> Base.url_encode64(),
+        "some-credential",
+        %{cose_key: %{}}
+      }
+    )
+
+    conn =
+      conn(:post, "/assertion/options", %{"userVerification" => "required"})
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouter.call([])
+
+    assert %{
+             "status" => "ok",
+             "errorMessage" => "",
+             "challenge" => _,
+             "userVerification" => "required",
+             # credential selection is entirely up to the user_keys/1 callback
+             "allowCredentials" => [%{"id" => "some-credential"}]
+           } = Jason.decode!(conn.resp_body)
+  end
+
   test "authentication" do
     :ets.insert(
       WaxAPIREST.Callback.Test,
