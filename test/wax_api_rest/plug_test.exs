@@ -270,6 +270,60 @@ defmodule WaxAPIREST.PlugTest do
     assert %{"status" => "ok", "timeout" => 60_000} = Jason.decode!(conn.resp_body)
   end
 
+  test "assertion options include stored credential transports" do
+    :ets.insert(
+      WaxAPIREST.Callback.Test,
+      {
+        :crypto.hash(:sha256, "abcdef") |> Base.url_encode64(),
+        "credential-with-transports",
+        %{cose_key: %{}, transports: ["internal", "hybrid"]}
+      }
+    )
+
+    conn =
+      conn(:post, "/assertion/options", %{"username" => "johndoe@example.com"})
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouter.call([])
+
+    assert %{
+             "status" => "ok",
+             "allowCredentials" => [descriptor]
+           } = Jason.decode!(conn.resp_body)
+
+    assert descriptor["id"] == "credential-with-transports"
+    assert descriptor["transports"] == ["internal", "hybrid"]
+  end
+
+  test "assertion options omit transports when none are stored" do
+    cookie_hash = :crypto.hash(:sha256, "abcdef") |> Base.url_encode64()
+
+    :ets.insert(
+      WaxAPIREST.Callback.Test,
+      {cookie_hash, "credential-without-transports", %{cose_key: %{}}}
+    )
+
+    :ets.insert(
+      WaxAPIREST.Callback.Test,
+      {cookie_hash, "credential-with-empty-transports", %{cose_key: %{}, transports: []}}
+    )
+
+    conn =
+      conn(:post, "/assertion/options", %{"username" => "johndoe@example.com"})
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouter.call([])
+
+    assert %{
+             "status" => "ok",
+             "allowCredentials" => [_, _] = descriptors
+           } = Jason.decode!(conn.resp_body)
+
+    for descriptor <- descriptors do
+      refute Map.has_key?(descriptor, "transports")
+    end
+  end
+
   test "authentication" do
     :ets.insert(
       WaxAPIREST.Callback.Test,

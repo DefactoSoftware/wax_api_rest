@@ -203,10 +203,10 @@ defmodule WaxAPIREST.Plug do
 
     creation_request = ServerPublicKeyCredentialGetOptionsRequest.new(conn.body_params)
 
+    user_keys = callback_module.user_keys(conn)
+
     allow_credentials =
-      conn
-      |> callback_module.user_keys()
-      |> Enum.map(fn {cred_id, %{cose_key: cose_key}} -> {cred_id, cose_key} end)
+      Enum.map(user_keys, fn {cred_id, %{cose_key: cose_key}} -> {cred_id, cose_key} end)
 
     challenge_opts =
       opts
@@ -219,7 +219,13 @@ defmodule WaxAPIREST.Plug do
       ServerPublicKeyCredentialGetOptionsResponse.new(
         creation_request,
         challenge,
-        Enum.map(allow_credentials, fn {key_id, _} -> key_id end),
+        Enum.map(user_keys, fn
+          {key_id, %{transports: [_ | _] = transports}} ->
+            {key_id, transports}
+
+          {key_id, _} ->
+            key_id
+        end),
         opts
       )
 
