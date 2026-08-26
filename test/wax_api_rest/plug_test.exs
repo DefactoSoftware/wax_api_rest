@@ -169,6 +169,19 @@ defmodule WaxAPIREST.PlugTest do
     forward("/", to: WaxAPIREST.Plug, callback_module: WaxAPIREST.Callback.Test)
   end
 
+  defmodule AppRouterTimeout do
+    use Plug.Router
+
+    plug(:match)
+    plug(:dispatch)
+
+    forward("/",
+      to: WaxAPIREST.Plug,
+      callback_module: WaxAPIREST.Callback.Test,
+      timeout: 60
+    )
+  end
+
   setup do
     WaxAPIREST.Callback.Test.setup_table()
     :ok
@@ -198,7 +211,9 @@ defmodule WaxAPIREST.PlugTest do
              "rp" => _,
              "user" => _,
              "challenge" => _,
-             "pubKeyCredParams" => _
+             "pubKeyCredParams" => _,
+             # the default Wax challenge timeout (120 seconds) in milliseconds
+             "timeout" => 120_000
            } = Jason.decode!(conn.resp_body)
 
     request =
@@ -227,6 +242,28 @@ defmodule WaxAPIREST.PlugTest do
              "status" => "failed",
              "errorMessage" => _
            } = Jason.decode!(conn.resp_body)
+  end
+
+  test "attestation options convert a non-default challenge timeout to milliseconds" do
+    request = %{"username" => "johndoe@example.com", "displayName" => "John Doe"}
+
+    conn =
+      conn(:post, "/attestation/options", request)
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouterTimeout.call([])
+
+    assert %{"status" => "ok", "timeout" => 60_000} = Jason.decode!(conn.resp_body)
+  end
+
+  test "assertion options convert a non-default challenge timeout to milliseconds" do
+    conn =
+      conn(:post, "/assertion/options", %{"username" => "johndoe@example.com"})
+      |> put_req_cookie("fido_test_suite", "abcdef")
+      |> put_resp_content_type("application/json")
+      |> AppRouterTimeout.call([])
+
+    assert %{"status" => "ok", "timeout" => 60_000} = Jason.decode!(conn.resp_body)
   end
 
   test "authentication" do
@@ -263,7 +300,9 @@ defmodule WaxAPIREST.PlugTest do
     assert %{
              "status" => "ok",
              "errorMessage" => "",
-             "challenge" => _
+             "challenge" => _,
+             # the default Wax challenge timeout (120 seconds) in milliseconds
+             "timeout" => 120_000
            } = Jason.decode!(conn.resp_body)
 
     request =

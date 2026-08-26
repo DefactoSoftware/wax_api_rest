@@ -75,7 +75,8 @@ defmodule WaxAPIREST.Types.ServerPublicKeyCredentialCreationOptionsResponse do
           {type, alg} ->
             PubKeyCredParams.new(type, alg)
         end),
-      timeout: challenge.timeout,
+      # `Wax.Challenge.t()` timeout is expressed in seconds, WebAuthn timeout in milliseconds
+      timeout: challenge.timeout * 1000,
       authenticatorSelection: request.authenticatorSelection,
       extensions: request.extensions,
       excludeCredentials: opts[:exclude_credentials] || [],
