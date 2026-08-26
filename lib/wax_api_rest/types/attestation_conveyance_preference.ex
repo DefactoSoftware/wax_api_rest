@@ -13,8 +13,12 @@ defmodule WaxAPIREST.Types.AttestationConveyancePreference do
   def new("none"), do: "none"
   def new("indirect"), do: "indirect"
   def new("direct"), do: "direct"
-  def new(val), do: raise Error.InvalidField,
-                    field: "attestation",
-                    value: val,
-                    accepted_value: ["none", "indirect", "direct"]
+
+  def new(val),
+    do:
+      raise(Error.InvalidField,
+        field: "attestation",
+        value: val,
+        accepted_value: ["none", "indirect", "direct"]
+      )
 end

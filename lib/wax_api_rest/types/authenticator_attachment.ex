@@ -9,8 +9,12 @@ defmodule WaxAPIREST.Types.AuthenticatorAttachment do
   @spec new(String.t()) :: t() | no_return()
   def new("platform"), do: "platform"
   def new("cross-platform"), do: "cross-platform"
-  def new(val), do: raise Error.InvalidField,
-                          field: "authenticatorAttachment",
-                          value: val,
-                          accepted_value: ["platform", "cross-platform"]
+
+  def new(val),
+    do:
+      raise(Error.InvalidField,
+        field: "authenticatorAttachment",
+        value: val,
+        accepted_value: ["platform", "cross-platform"]
+      )
 end
