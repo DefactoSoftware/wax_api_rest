@@ -17,25 +17,37 @@ defmodule WaxAPIREST.Types.ServerPublicKeyCredential do
   ]
 
   @type t :: %__MODULE__{
-    id: String.t(),
-    rawId: String.t(),
-    response:
-      ServerAuthenticatorAttestationResponse.t() | ServerAuthenticatorAssertionResponse.t(),
-    type: PublicKeyCredentialType.t(),
-    getClientExtensionResults: map() | nil
-  }
+          id: String.t(),
+          rawId: String.t(),
+          response:
+            ServerAuthenticatorAttestationResponse.t() | ServerAuthenticatorAssertionResponse.t(),
+          type: PublicKeyCredentialType.t(),
+          getClientExtensionResults: map() | nil
+        }
+
+  # Maximum lengths for input validation (security: prevent DoS via large inputs)
+  @max_credential_id_length 1024
 
   @spec new(map()) :: t() | no_return()
-  def new(%{
-    "id" => id,
-    "rawId" => rawId,
-    "response" => response,
-    "type" => "public-key" = type
-  } = request) when
-    is_binary(id) and
-    is_binary(rawId) and
-    id == rawId
-  do
+  def new(
+        %{
+          "id" => id,
+          "rawId" => rawId,
+          "response" => response,
+          "type" => "public-key" = type
+        } = request
+      )
+      when is_binary(id) and
+             is_binary(rawId) and
+             id == rawId do
+    # Validate credential ID size
+    if byte_size(id) > @max_credential_id_length do
+      raise Error.InvalidField,
+        field: "id",
+        value: id,
+        reason: "exceeds maximum length of #{@max_credential_id_length} bytes"
+    end
+
     case Base.url_decode64(id, padding: false) do
       {:ok, _} ->
         :ok
@@ -77,7 +89,7 @@ defmodule WaxAPIREST.Types.ServerPublicKeyCredential do
       raise Error.MissingField, field: "rawId"
     end
 
-    if request["type"] == nil, do: raise Error.MissingField, field: "type"
+    if request["type"] == nil, do: raise(Error.MissingField, field: "type")
 
     if request["type"] != "public-key" do
       raise Error.InvalidField,

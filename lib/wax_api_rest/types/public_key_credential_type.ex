@@ -9,8 +9,12 @@ defmodule WaxAPIREST.Types.PublicKeyCredentialType do
 
   @spec new(String.t()) :: t() | no_return()
   def new("public-key"), do: "public-key"
-  def new(val), do: raise Error.InvalidField,
-                    field: "type",
-                    value: val,
-                    accepted_value: ["public-key"]
+
+  def new(val),
+    do:
+      raise(Error.InvalidField,
+        field: "type",
+        value: val,
+        accepted_value: ["public-key"]
+      )
 end
