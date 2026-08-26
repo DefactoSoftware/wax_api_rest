@@ -66,7 +66,9 @@ defmodule WaxAPIREST.Types.ServerPublicKeyCredential do
         if response["signature"] do
           ServerAuthenticatorAssertionResponse.new(response)
         else
-          ServerAuthenticatorAttestationResponse.new(response)
+          # the top-level "transports" field is used as a fallback when the
+          # response object doesn't contain it
+          ServerAuthenticatorAttestationResponse.new(response, request["transports"])
         end,
       type: type,
       getClientExtensionResults: request["getClientExtensionResults"]

@@ -187,7 +187,8 @@ defmodule WaxAPIREST.Plug do
         |> callback_module.register_key(
           registration_request.rawId,
           authenticator_data,
-          attestation_result
+          attestation_result,
+          registration_request.response.transports
         )
         |> callback_module.invalidate_challenge()
         |> send_json(200, %{

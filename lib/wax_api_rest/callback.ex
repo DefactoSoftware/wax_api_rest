@@ -124,6 +124,12 @@ defmodule WaxAPIREST.Callback do
 
   A single user can register several keys. Each key is identified by its `key_id`.
 
+  The `transports` parameter is the list of transports reported by the client
+  (the value of `AuthenticatorAttestationResponse.getTransports()`), possibly empty.
+  As recommended by the WebAuthn specification, it should be stored along with the
+  credential so that it can be returned in the `t:WaxAPIREST.Callback.key_data/0`
+  `:transports` field and included in authentication options' `allowCredentials`.
+
   It returns the connection. This can be used to set a value (cookie...) in it.
 
   If a fault occurs an exception can be raised. Its error message will be displayed in the
@@ -133,7 +139,8 @@ defmodule WaxAPIREST.Callback do
     conn :: Plug.Conn.t(),
     credential_id :: Wax.CredentialId.t(),
     authenticator_data :: Wax.AuthenticatorData.t(),
-    attestation_result :: Wax.Attestation.result()
+    attestation_result :: Wax.Attestation.result(),
+    transports :: [AuthenticatorTransport.t()]
   ) :: Plug.Conn.t() | no_return()
 
   @doc """
