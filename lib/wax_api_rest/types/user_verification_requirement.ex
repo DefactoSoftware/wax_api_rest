@@ -13,8 +13,12 @@ defmodule WaxAPIREST.Types.UserVerificationRequirement do
   def new("required"), do: "required"
   def new("preferred"), do: "preferred"
   def new("discouraged"), do: "discouraged"
-  def new(val), do: raise Error.InvalidField,
-                    field: "userVerification",
-                    value: val,
-                    accepted_value: ["discouraged", "preferred", "required"]
+
+  def new(val),
+    do:
+      raise(Error.InvalidField,
+        field: "userVerification",
+        value: val,
+        accepted_value: ["discouraged", "preferred", "required"]
+      )
 end

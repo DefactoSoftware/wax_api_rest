@@ -17,8 +17,12 @@ defmodule WaxAPIREST.Types.AuthenticatorTransport do
   def new("ble"), do: "direct"
   def new("internal"), do: "direct"
   def new("lightning"), do: "direct"
-  def new(val), do: raise Error.InvalidField,
-                    field: "transports",
-                    value: val,
-                    accepted_value: ["usb", "nfc", "ble", "internal", "lightning"]
+
+  def new(val),
+    do:
+      raise(Error.InvalidField,
+        field: "transports",
+        value: val,
+        accepted_value: ["usb", "nfc", "ble", "internal", "lightning"]
+      )
 end
