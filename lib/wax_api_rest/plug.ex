@@ -353,8 +353,8 @@ defmodule WaxAPIREST.Plug do
           })
         end
 
-      {:error, e} ->
-        send_json(conn, 400, %{"status" => "failed", "errorMessage" => sanitize_error_message(e)})
+      {:error, _} ->
+        send_json(conn, 400, %{"status" => "failed", "errorMessage" => "authentication failed"})
     end
   end
 
@@ -465,32 +465,6 @@ defmodule WaxAPIREST.Plug do
   end
 
   defp sanitize_reason(_), do: "invalid value"
-
-  # Sanitize error messages from external libraries to prevent information disclosure
-  defp sanitize_error_message(error) do
-    case error do
-      %WaxAPIREST.Types.Error.MissingField{} = e ->
-        # Use the error function for our own error types
-        error(%Plug.Conn{}, e)
-        |> Map.get(:resp_body)
-        |> Jason.decode!()
-        |> Map.get("errorMessage")
-
-      %WaxAPIREST.Types.Error.InvalidField{} = e ->
-        # Use the error function for our own error types
-        error(%Plug.Conn{}, e)
-        |> Map.get(:resp_body)
-        |> Jason.decode!()
-        |> Map.get("errorMessage")
-
-      %_{} ->
-        # For other exceptions, use a generic message to avoid leaking internal details
-        "authentication failed"
-
-      _ ->
-        "authentication failed"
-    end
-  end
 
   @spec callback_module(opts()) :: module()
   def callback_module(opts) do
