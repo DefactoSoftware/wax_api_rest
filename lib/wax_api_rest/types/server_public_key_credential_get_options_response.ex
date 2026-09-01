@@ -47,7 +47,8 @@ defmodule WaxAPIREST.Types.ServerPublicKeyCredentialGetOptionsResponse do
 
     %__MODULE__{
       challenge: Base.url_encode64(challenge.bytes, padding: false),
-      timeout: challenge.timeout,
+      # `Wax.Challenge.t()` timeout is expressed in seconds, WebAuthn timeout in milliseconds
+      timeout: challenge.timeout * 1000,
       rpId: challenge.rp_id,
       extensions: request.extensions,
       allowCredentials: allow_credentials,

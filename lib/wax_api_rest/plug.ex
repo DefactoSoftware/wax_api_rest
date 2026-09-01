@@ -74,6 +74,13 @@ defmodule WaxAPIREST.Plug do
   [Security Concerns Surrounding WebAuthn: Don't Implement ECDAA (Yet)](https://paragonie.com/blog/2018/08/security-concerns-surrounding-webauthn-don-t-implement-ecdaa-yet)
   - `:attestation_conveyance_preference`: the attestation conveyance preference. Defaults
   to the value of the request or, if absent, to `"none"`
+  - `:authenticator_selection`: the [authenticator selection criteria](https://www.w3.org/TR/webauthn/#dictdef-authenticatorselectioncriteria)
+  enforced by the server, either as a `t:WaxAPIREST.Types.AuthenticatorSelectionCriteria.t/0`
+  struct or as a map with string keys (for instance
+  `%{"residentKey" => "required", "userVerification" => "required"}`). When set, it takes
+  precedence over the value of the request. Its `userVerification` member is also set on
+  the registration challenge, so that `"required"` is enforced by `Wax.register/3` when
+  verifying the attestation result. Defaults to the value of the request
 
   The options can be configured (in order of precedence):
   - through options passed as a parameter to the plug router
@@ -84,6 +91,7 @@ defmodule WaxAPIREST.Plug do
           | {:rp_name, String.t()}
           | {:pub_key_cred_params, [Wax.CoseKey.cose_alg()]}
           | {:attestation_conveyance_preference, AttestationConveyancePreference.t()}
+          | {:authenticator_selection, AuthenticatorSelectionCriteria.t() | map()}
 
   # Maximum lengths for input validation (security: prevent DoS via large inputs)
   # ~64KB for base64-encoded data
@@ -99,9 +107,21 @@ defmodule WaxAPIREST.Plug do
 
     creation_request = ServerPublicKeyCredentialCreationOptionsRequest.new(conn.body_params)
 
+    authenticator_selection =
+      AuthenticatorSelectionCriteria.normalize(
+        opts[:authenticator_selection] ||
+          Application.get_env(WaxAPIREST, :authenticator_selection) ||
+          creation_request.authenticatorSelection
+      )
+
+    # the resolved value is passed down so that the response is built from the exact
+    # same authenticator selection criteria the challenge was created with
+    opts = Keyword.put(opts, :authenticator_selection, authenticator_selection)
+
     challenge =
       opts
       |> Keyword.put(:attestation, creation_request.attestation)
+      |> put_user_verification(authenticator_selection)
       |> Wax.new_registration_challenge()
 
     user_info = callback_module.user_info(conn)
@@ -187,7 +207,8 @@ defmodule WaxAPIREST.Plug do
         |> callback_module.register_key(
           registration_request.rawId,
           authenticator_data,
-          attestation_result
+          attestation_result,
+          registration_request.response.transports
         )
         |> callback_module.invalidate_challenge()
         |> send_json(200, %{
@@ -206,10 +227,10 @@ defmodule WaxAPIREST.Plug do
 
     creation_request = ServerPublicKeyCredentialGetOptionsRequest.new(conn.body_params)
 
+    user_keys = callback_module.user_keys(conn)
+
     allow_credentials =
-      conn
-      |> callback_module.user_keys()
-      |> Enum.map(fn {cred_id, %{cose_key: cose_key}} -> {cred_id, cose_key} end)
+      Enum.map(user_keys, fn {cred_id, %{cose_key: cose_key}} -> {cred_id, cose_key} end)
 
     challenge_opts =
       opts
@@ -222,7 +243,13 @@ defmodule WaxAPIREST.Plug do
       ServerPublicKeyCredentialGetOptionsResponse.new(
         creation_request,
         challenge,
-        Enum.map(allow_credentials, fn {key_id, _} -> key_id end),
+        Enum.map(user_keys, fn
+          {key_id, %{transports: [_ | _] = transports}} ->
+            {key_id, transports}
+
+          {key_id, _} ->
+            key_id
+        end),
         opts
       )
 
@@ -330,6 +357,15 @@ defmodule WaxAPIREST.Plug do
         send_json(conn, 400, %{"status" => "failed", "errorMessage" => sanitize_error_message(e)})
     end
   end
+
+  @spec put_user_verification(Keyword.t(), AuthenticatorSelectionCriteria.t() | nil) ::
+          Keyword.t()
+  defp put_user_verification(opts, %AuthenticatorSelectionCriteria{userVerification: uv})
+       when is_binary(uv) do
+    Keyword.put(opts, :user_verification, uv)
+  end
+
+  defp put_user_verification(opts, _), do: opts
 
   @spec sign_count_valid?(
           Wax.CredentialId.t(),
